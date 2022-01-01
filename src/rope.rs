@@ -1,17 +1,9 @@
+#[derive(Default)]
 pub struct World {
-  nodes : Vec<RopeNode>,
-  ropes : Vec<Rope>,
-  colliders : Vec<Collider>
-}
-
-impl Default for World {
-  fn default() -> Self {
-    Self {
-      nodes : vec![],
-      ropes : vec![],
-      colliders : vec![],
-    }
-  }
+  pub nodes : Vec<RopeNode>,
+  pub ropes : Vec<Rope>,
+  pub colliders : Vec<Collider>,
+  pub forces : Vec<Box<dyn Force>>,
 }
 
 impl World {
@@ -37,19 +29,37 @@ impl World {
     &mut self.nodes[id]
   }
 
-  fn get_rope_mut(&mut self, id : usize) -> &mut Rope {
+  pub fn get_rope(&self, id : usize) -> &Rope {
+    &self.ropes[id]
+  }
+
+  pub fn get_rope_mut(&mut self, id : usize) -> &mut Rope {
     &mut self.ropes[id]
   }
 
   // Done here due to borrow pain
   fn tick_rope(&mut self, rope_id : usize) {
     let rope = self.ropes[rope_id];
+
+    if (rope.broken) {
+      return;
+    }
+
     let from_0 = self.nodes[rope.from].clone();
     let to_0 = self.nodes[rope.to].clone();
     //let centre = from_0.pos.add(to_0.pos).mult(0.5);
     let centre = from_0.pos.add(to_0.pos.sub(from_0.pos).mult(0.5));
 
+    // TODO trying to get ropes to break?
+    ////let dist = from_0.pos.sub(to_0.pos).mag();
+    ////if (dist > rope.length * 1.5) {
+    ////  // Break!
+    ////  self.ropes[rope_id].broken = true;
+    ////  return;
+    ////}
+
     let half_len = rope.length / 2.0;
+
     match (from_0.node_type, to_0.node_type) {
       (NodeType::Fixed, NodeType::Fixed) => {
         // Nothing to do, both ends fixed
@@ -70,7 +80,7 @@ impl World {
 
   pub fn tick(&mut self, dt_norm : f32) {
     for node in &mut self.nodes {
-      node.tick(dt_norm);
+      node.tick(&self.forces, dt_norm);
     }
 
     const SIM_ITERS : usize = 8;
@@ -102,37 +112,45 @@ impl Default for Vec2 {
 }
 
 impl Vec2 {
-  fn new(x : f32, y : f32) -> Self {
+  pub fn new(x : f32, y : f32) -> Self {
     Self { x, y }
   }
 
-  fn add(&self, other : Self) -> Self {
+  pub fn add(&self, other : Self) -> Self {
     Self::new(self.x + other.x, self.y + other.y)
   }
 
-  fn sub(&self, other : Self) -> Self {
+  pub fn sub(&self, other : Self) -> Self {
     Self::new(self.x - other.x, self.y - other.y)
   }
 
-  fn mult(&self, k : f32) -> Self {
+  pub fn mult(&self, k : f32) -> Self {
     Self::new(self.x * k, self.y * k)
   }
 
-  fn dist(&self, other : Self) -> f32 {
+  pub fn dist(&self, other : Self) -> f32 {
     let dx = self.x - other.x;
     let dy = self.y - other.y;
     (dx * dx + dy * dy).sqrt()
   }
 
-  fn dot(&self, other : Self) -> f32 {
+  pub fn dot(&self, other : Self) -> f32 {
     self.x * other.x + self.y * other.y
   }
 
-  fn mag(&self) -> f32 {
-    (self.x * self.x + self.y * self.y).sqrt()
+  pub fn mag2(&self) -> f32 {
+    self.x * self.x + self.y * self.y
   }
 
-  fn project_dist_towards(&self, other : Self, dist : f32) -> Self {
+  pub fn mag(&self) -> f32 {
+    self.mag2().sqrt()
+  }
+
+  pub fn norm(&self) -> Self {
+    self.mult(1.0/self.mag())
+  }
+
+  pub fn project_dist_towards(&self, other : Self, dist : f32) -> Self {
     let diff = other.sub(self.clone());
 
     let diff_mag = diff.mag();
@@ -158,7 +176,7 @@ impl RopeNode {
     }
   }
 
-  fn tick(&mut self, dt_norm : f32) {
+  fn tick(&mut self, forces: &[Box<dyn Force>], dt_norm : f32) {
     if (self.node_type == NodeType::Fixed) {
       return;
     }
@@ -169,9 +187,9 @@ impl RopeNode {
     const FRIC : f32 = 0.98;
     vel = vel.mult(FRIC);
 
-    // tmp grav
-    //vel.y += dt_norm * 0.002;
-    vel.y += 0.2;
+    for force in forces {
+      vel = vel.add(force.get_force(self.pos));
+    }
 
     self.prev_pos = self.pos;
     //self.pos = self.pos.add(vel.mult(dt_norm));
@@ -181,9 +199,10 @@ impl RopeNode {
 
 #[derive(Copy, Clone, Debug)]
 pub struct Rope {
-  from : usize,
-  to : usize,
+  pub from : usize,
+  pub to : usize,
   length : f32,
+  pub broken : bool,
 }
 
 impl Rope {
@@ -193,9 +212,43 @@ impl Rope {
       from,
       to,
       length,
+      broken: false,
     }
   }
 }
 
-struct Collider {
+pub struct Collider {
+}
+
+pub trait Force {
+  fn get_force(&self, rope_node_pos : Vec2) -> Vec2;
+}
+
+pub struct ConstantForce {
+  pub force : Vec2,
+}
+
+impl Force for ConstantForce {
+  fn get_force(&self, _: Vec2) -> Vec2 {
+    self.force
+  }
+}
+
+pub struct InverseSquareForce {
+  pub strength : f32,
+  pub pos : Vec2,
+}
+
+impl Force for InverseSquareForce {
+  fn get_force(&self, rope_pos: Vec2) -> Vec2 {
+    let delta = self.pos.sub(rope_pos);
+    let d2 = delta.mag2();
+    if (d2 == 0.0) {
+      return Vec2::default();
+    }
+
+    let d = delta.mag();
+    let mag = self.strength / d2;
+    delta.mult(mag / d)
+  }
 }
