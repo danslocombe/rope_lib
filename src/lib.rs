@@ -2,6 +2,7 @@
 
 mod rope;
 mod generator;
+mod dense_grid;
 
 use gms_binder::*;
 use std::time::Instant;
@@ -236,17 +237,13 @@ pub extern "C" fn blueprint(x : f64, y : f64, world_x : f64, world_y : f64) -> *
         let mut gen = Generator::new(10);
         let blueprint = gen.gen();
 
-        let normal = Vec2::new((x - world_x) as f32, (y - world_y) as f32).norm();
-        let tangent = Vec2::new(-normal.y, normal.x);
-
         let state = GLOBAL_STATE.as_mut().unwrap();
         let generated = GeneratedStructure::from_blueprint(
             &blueprint,
             &mut state.world,
             Vec2::new(x as f32, y as f32),
-            16.,
-            tangent,
-            normal);
+            Vec2::new(world_x as f32, world_y as f32),
+            16.);
 
         let json = serde_json::to_string(&generated).unwrap();
         println!("{}", json);
