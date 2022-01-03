@@ -1,33 +1,31 @@
 #![allow(unused_parens)]
 
-mod rope;
-mod generator;
 mod dense_grid;
+mod generator;
+mod rope;
 
 use gms_binder::*;
-use std::time::Instant;
-use std::ffi::{CStr, CString};
+use std::ffi::CString;
 use std::os::raw::c_char;
+use std::time::Instant;
 
-use rope::*;
 use generator::*;
+use rope::*;
 
-static mut GLOBAL_STATE : Option<GlobalState> = None;
+static mut GLOBAL_STATE: Option<GlobalState> = None;
 
-struct GlobalState
-{
-    pub t : usize,
-    pub world : World,
-    pub last_tick : Instant,
+struct GlobalState {
+    pub t: usize,
+    pub world: World,
+    pub last_tick: Instant,
 }
 
-impl GlobalState
-{
+impl GlobalState {
     fn new() -> Self {
         Self {
             t: 0,
             world: World::default(),
-            last_tick : Instant::now(),
+            last_tick: Instant::now(),
         }
     }
 }
@@ -45,7 +43,7 @@ pub extern "C" fn reset() -> f64 {
 
 #[no_mangle]
 #[gms_bind]
-pub extern "C" fn add_node(x : f64, y : f64) -> f64 {
+pub extern "C" fn add_node(x: f64, y: f64) -> f64 {
     unsafe {
         let state = GLOBAL_STATE.as_mut().unwrap();
         let id = state.world.add_node(x as f32, y as f32);
@@ -55,7 +53,7 @@ pub extern "C" fn add_node(x : f64, y : f64) -> f64 {
 
 #[no_mangle]
 #[gms_bind]
-pub extern "C" fn set_fixed(nid : f64) -> f64 {
+pub extern "C" fn set_fixed(nid: f64) -> f64 {
     unsafe {
         let state = GLOBAL_STATE.as_mut().unwrap();
         let mut node = state.world.get_node_mut(nid.round() as usize);
@@ -66,7 +64,7 @@ pub extern "C" fn set_fixed(nid : f64) -> f64 {
 
 #[no_mangle]
 #[gms_bind]
-pub extern "C" fn set_node_pos(nid : f64, x : f64, y : f64) -> f64 {
+pub extern "C" fn set_node_pos(nid: f64, x: f64, y: f64) -> f64 {
     unsafe {
         let state = GLOBAL_STATE.as_mut().unwrap();
         let mut node = state.world.get_node_mut(nid.round() as usize);
@@ -78,10 +76,12 @@ pub extern "C" fn set_node_pos(nid : f64, x : f64, y : f64) -> f64 {
 
 #[no_mangle]
 #[gms_bind]
-pub extern "C" fn add_rope(from : f64, to : f64) -> f64 {
+pub extern "C" fn add_rope(from: f64, to: f64) -> f64 {
     unsafe {
         let state = GLOBAL_STATE.as_mut().unwrap();
-        let id = state.world.add_rope(from.round() as usize, to.round() as usize);
+        let id = state
+            .world
+            .add_rope(from.round() as usize, to.round() as usize);
         id as f64
     }
 }
@@ -94,9 +94,9 @@ pub extern "C" fn tick() -> f64 {
         state.t += 1;
 
         let new_last_tick = Instant::now();
-        let since_start = new_last_tick.duration_since(state.last_tick); 
+        let since_start = new_last_tick.duration_since(state.last_tick);
         let micros_since = since_start.as_micros() as f32;
-        const SIXTY_FPS_DUR_MICROS : f32 = 1_000_000.0 / 60.0;
+        const SIXTY_FPS_DUR_MICROS: f32 = 1_000_000.0 / 60.0;
         let norm_dt = micros_since / SIXTY_FPS_DUR_MICROS;
 
         state.world.tick(norm_dt);
@@ -119,7 +119,7 @@ pub extern "C" fn dry_tick() -> f64 {
 
 #[no_mangle]
 #[gms_bind]
-pub extern "C" fn get_node_x(id : f64) -> f64 {
+pub extern "C" fn get_node_x(id: f64) -> f64 {
     unsafe {
         let state = GLOBAL_STATE.as_mut().unwrap();
         state.world.get_node(id.round() as usize).pos.x as f64
@@ -128,7 +128,7 @@ pub extern "C" fn get_node_x(id : f64) -> f64 {
 
 #[no_mangle]
 #[gms_bind]
-pub extern "C" fn get_node_y(id : f64) -> f64 {
+pub extern "C" fn get_node_y(id: f64) -> f64 {
     unsafe {
         let state = GLOBAL_STATE.as_mut().unwrap();
         state.world.get_node(id.round() as usize).pos.y as f64
@@ -137,7 +137,7 @@ pub extern "C" fn get_node_y(id : f64) -> f64 {
 
 #[no_mangle]
 #[gms_bind]
-pub extern "C" fn toggle_node(id : f64) -> f64 {
+pub extern "C" fn toggle_node(id: f64) -> f64 {
     unsafe {
         let state = GLOBAL_STATE.as_mut().unwrap();
         let mut node = state.world.get_node_mut(id.round() as usize);
@@ -152,7 +152,7 @@ pub extern "C" fn toggle_node(id : f64) -> f64 {
 
 #[no_mangle]
 #[gms_bind]
-pub extern "C" fn get_node_type(id : f64) -> f64 {
+pub extern "C" fn get_node_type(id: f64) -> f64 {
     unsafe {
         let state = GLOBAL_STATE.as_ref().unwrap();
         match state.world.get_node(id.round() as usize).node_type {
@@ -164,13 +164,12 @@ pub extern "C" fn get_node_type(id : f64) -> f64 {
 
 #[no_mangle]
 #[gms_bind]
-pub extern "C" fn get_rope_broken(id : f64) -> f64 {
+pub extern "C" fn get_rope_broken(id: f64) -> f64 {
     unsafe {
         let state = GLOBAL_STATE.as_ref().unwrap();
         if (state.world.get_rope(id.round() as usize).broken) {
             1.0
-        }
-        else {
+        } else {
             0.0
         }
     }
@@ -178,7 +177,7 @@ pub extern "C" fn get_rope_broken(id : f64) -> f64 {
 
 #[no_mangle]
 #[gms_bind]
-pub extern "C" fn get_rope_from(id : f64) -> f64 {
+pub extern "C" fn get_rope_from(id: f64) -> f64 {
     unsafe {
         let state = GLOBAL_STATE.as_ref().unwrap();
         state.world.get_rope(id.round() as usize).from as f64
@@ -187,7 +186,7 @@ pub extern "C" fn get_rope_from(id : f64) -> f64 {
 
 #[no_mangle]
 #[gms_bind]
-pub extern "C" fn get_rope_to(id : f64) -> f64 {
+pub extern "C" fn get_rope_to(id: f64) -> f64 {
     unsafe {
         let state = GLOBAL_STATE.as_ref().unwrap();
         state.world.get_rope(id.round() as usize).to as f64
@@ -205,7 +204,7 @@ pub extern "C" fn get_sim_t() -> f64 {
 
 #[no_mangle]
 #[gms_bind]
-pub extern "C" fn add_static_force(x : f64, y : f64) -> f64 {
+pub extern "C" fn add_static_force(x: f64, y: f64) -> f64 {
     unsafe {
         let state = GLOBAL_STATE.as_mut().unwrap();
         state.world.forces.push(Box::new(ConstantForce {
@@ -218,7 +217,7 @@ pub extern "C" fn add_static_force(x : f64, y : f64) -> f64 {
 
 #[no_mangle]
 #[gms_bind]
-pub extern "C" fn add_inverse_square_force(strength: f64, x : f64, y : f64) -> f64 {
+pub extern "C" fn add_inverse_square_force(strength: f64, x: f64, y: f64) -> f64 {
     unsafe {
         let state = GLOBAL_STATE.as_mut().unwrap();
         state.world.forces.push(Box::new(InverseSquareForce {
@@ -232,7 +231,7 @@ pub extern "C" fn add_inverse_square_force(strength: f64, x : f64, y : f64) -> f
 
 #[no_mangle]
 #[gms_bind]
-pub extern "C" fn blueprint(x : f64, y : f64, world_x : f64, world_y : f64) -> *const c_char {
+pub extern "C" fn blueprint(x: f64, y: f64, world_x: f64, world_y: f64) -> *const c_char {
     unsafe {
         let mut gen = Generator::new(10);
         let blueprint = gen.gen();
@@ -243,7 +242,8 @@ pub extern "C" fn blueprint(x : f64, y : f64, world_x : f64, world_y : f64) -> *
             &mut state.world,
             Vec2::new(x as f32, y as f32),
             Vec2::new(world_x as f32, world_y as f32),
-            16.);
+            16.,
+        );
 
         let json = serde_json::to_string(&generated).unwrap();
         println!("{}", json);
@@ -256,9 +256,12 @@ pub extern "C" fn blueprint(x : f64, y : f64, world_x : f64, world_y : f64) -> *
 
 #[no_mangle]
 #[gms_bind]
-pub extern "C" fn free_string(s : *mut c_char) -> f64 {
+pub extern "C" fn free_string(s: *mut c_char) -> f64 {
     unsafe {
-        let _ = CString::from_raw(s);
+        if (!s.is_null()) {
+            let _ = CString::from_raw(s);
+        }
+
         0.0
     }
 }
