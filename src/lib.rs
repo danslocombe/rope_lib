@@ -3,6 +3,7 @@
 mod dense_grid;
 mod generator;
 mod rope;
+mod blueprint_to_world_transform;
 
 use gms_binder::*;
 use std::ffi::CString;
@@ -237,12 +238,13 @@ pub extern "C" fn blueprint(x: f64, y: f64, world_x: f64, world_y: f64) -> *cons
         let blueprint = gen.gen();
 
         let state = GLOBAL_STATE.as_mut().unwrap();
+        let transform = blueprint_to_world_transform::HybridTransform::new(Vec2::new(x as f32, y as f32), Vec2::new(world_x as f32, world_y as f32), 20.);
+        let boxed_transform = Box::new(transform) as Box<dyn blueprint_to_world_transform::BlueprintToWorldTransform>;
+
         let generated = GeneratedStructure::from_blueprint(
             &blueprint,
             &mut state.world,
-            Vec2::new(x as f32, y as f32),
-            Vec2::new(world_x as f32, world_y as f32),
-            16.,
+            &boxed_transform,
         );
 
         let json = serde_json::to_string(&generated).unwrap();

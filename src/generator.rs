@@ -1,8 +1,9 @@
 use std::collections::HashSet;
+use std::hash::Hash;
 
-use rand::rngs::SmallRng;
-use rand::{RngCore, SeedableRng};
+use rand::RngCore;
 use serde::{Deserialize, Serialize};
+use froggy_rand::FroggyRand;
 
 use crate::dense_grid::{DenseGrid, I2};
 use crate::rope::*;
@@ -19,79 +20,34 @@ impl GeneratedStructure {
     pub fn from_blueprint(
         blue: &Blueprint,
         world: &mut World,
-        point_on_world: Vec2,
-        world_centre: Vec2,
-        scale: f32,
+        transform : &Box<dyn crate::blueprint_to_world_transform::BlueprintToWorldTransform>,
     ) -> Self {
+
+        let mut generated = Self::default();
         let mut realised_node_ids: Vec<usize> = vec![];
-        let mut floor_pinned_nodes: Vec<usize> = vec![];
-        let mut nodes: Vec<usize> = vec![];
-
-        let normal = point_on_world.sub(world_centre).norm();
-        let tangent = Vec2::new(-normal.y, normal.x);
-
-        let world_radius = point_on_world.dist(world_centre);
-        let theta = scale.atan2(world_radius);
-        let angle_base = normal.y.atan2(normal.x);
 
         for (node_pos, is_floor_pinned) in &blue.nodes {
-            //let transformed = offset.add(node_pos.mult(scale));
-
-            /*
-            // Linear + offset transformation
-            let offset = point_on_world;
-            let mut p = offset;
-            p = p.add(tangent.mult(node_pos.x * scale));
-            p = p.add(normal.mult(node_pos.y * scale));
-            */
-
-            /*
-            // Curved transformation
-            //let polar_angle = node_pos.x * theta;
-            //let polar_r = world_radius + node_pos.y * scale;
-
-            //let p = world_centre.add(Vec2::new(
-              //polar_r * polar_angle.cos(),
-              //polar_r * polar_angle.sin()));
-            */
-
-            // Hybrid
-            let base_point_polar_angle =
-                angle_base + (node_pos.x * theta) / (1.0 + 0.0125 * node_pos.y);
-            let base_point = world_centre.add(Vec2::new(
-                world_radius * base_point_polar_angle.cos(),
-                world_radius * base_point_polar_angle.sin(),
-            ));
-
-            let p = base_point.add(normal.mult(node_pos.y * scale));
+            let p = transform.transform(*node_pos);
 
             let id = world.add_node(p.x, p.y);
             realised_node_ids.push(id);
             if (*is_floor_pinned) {
-                floor_pinned_nodes.push(id);
+                generated.floor_pinned_nodes.push(id);
             } else {
-                nodes.push(id);
+                generated.nodes.push(id);
             }
         }
-
-        let mut ropes: Vec<usize> = vec![];
-        let mut ropes_nodraw: Vec<usize> = vec![];
 
         for (from, to, visible) in &blue.ropes {
             let rope_id = world.add_rope(realised_node_ids[*from], realised_node_ids[*to]);
             if (*visible) {
-                ropes.push(rope_id);
+                generated.ropes.push(rope_id);
             } else {
-                ropes_nodraw.push(rope_id)
+                generated.ropes_nodraw.push(rope_id)
             }
         }
 
-        Self {
-            floor_pinned_nodes,
-            nodes,
-            ropes,
-            ropes_nodraw,
-        }
+        generated
     }
 }
 
@@ -150,42 +106,105 @@ impl Blueprint {
 }
 
 pub struct Generator {
-    rng: SmallRng,
+    froggy_rand : FroggyRand,
 }
 
 impl Generator {
     pub fn new(input_seed: u8) -> Self {
+        /*
         let mut seed: <SmallRng as SeedableRng>::Seed = Default::default();
         seed[0] = input_seed;
 
         Self {
             rng: SmallRng::from_seed(seed),
         }
+        */
+        Self {
+            froggy_rand: FroggyRand::new(rand::thread_rng().next_u64()),
+        }
     }
 
-    fn gen_intermediate(&mut self) -> IntermediateStructure {
+    fn add_tower_roof<T : Hash + Copy>(&self, int : &mut IntermediateStructure, seed : T, x : i32, y : i32) {
+        let height = self.froggy_rand.gen_froggy(("height", seed), 1., 4., 3).round() as u32;
+
+        for iy in 0..height {
+            int.set(I2::new(x, y + iy as i32), CellState::EdgeBlock);
+        }
+
+        let roof = self.froggy_rand.gen_unit(("roof", x, seed)) < 0.5;
+        
+        if (roof) {
+            int.set(I2::new(x, y + height as i32), CellState::Roof);
+        }
+    }
+
+    fn gen_gothic_house<T : Hash + Copy>(&self, seed : T) -> IntermediateStructure {
         let mut int = IntermediateStructure::default();
 
-        for i in 0..4 {
-            int.set(I2::new(0, i), CellState::Scaffolding);
-        }
+        let half_width = *self.froggy_rand.choose(("half_width", seed), &[1, 2, 3]);
 
-        for i in 0..2 {
-            int.set(I2::new(1, i), CellState::Scaffolding);
+        for x in -half_width..=half_width {
+            self.add_tower_roof(&mut int, ("roofing", x, seed), x, 0);
         }
-
-        for i in 0..4 {
-            int.set(I2::new(2, i), CellState::Scaffolding);
-        }
-
-        int.set(I2::new(0, 4), CellState::Roof);
-        int.set(I2::new(2, 4), CellState::Roof);
 
         int
     }
 
-    pub fn gen(&mut self) -> Blueprint {
-        self.gen_intermediate().to_blueprint()
+    fn gen_industrial<T : Hash + Copy>(&self, seed : T) -> IntermediateStructure {
+        let mut int = IntermediateStructure::default();
+
+        let block_count = *self.froggy_rand.choose(("block_count", seed), &[2, 3]);
+        let mut width = *self.froggy_rand.choose(("width", seed), &[3, 3, 5]);
+        let mut half_width = width / 2;
+
+        let mut y = 0;
+
+        for i in 0..block_count {
+            let stilt_height = self.froggy_rand.gen_froggy(("stilt_height", i, seed), 1.2, 3., 3).round() as i32;
+            int.set_block(I2::new(-half_width, y), I2::new(1, stilt_height), CellState::Scaffolding);
+            int.set_block(I2::new(half_width, y), I2::new(1, stilt_height), CellState::Scaffolding);
+            y += stilt_height;
+
+            let width_mod = *self.froggy_rand.choose(("width_mod", i, seed), &[-2, 0, 0, 2]);
+            width += width_mod;
+            half_width += width_mod / 2;
+
+            if (width <= 1) {
+                return int;
+            }
+
+            let block_height = self.froggy_rand.gen_froggy(("block_height", i, seed), 1., 2.8, 3).round() as i32;
+            int.set_block(I2::new(-half_width, y), I2::new(width, block_height), CellState::EdgeBlock);
+            y += block_height;
+        }
+
+        for x in -half_width..half_width {
+            self.add_tower_roof(&mut int, ("roofing", x, seed), x, y);
+        }
+
+        int
+    }
+
+    fn gen_tower<T : Hash>(&self, seed : T) -> IntermediateStructure {
+        let mut int = IntermediateStructure::default();
+
+        let height = self.froggy_rand.gen_froggy(("tower_height", seed), 3., 6., 3).round() as u32;
+
+        for y in 0..height {
+            int.set(I2::new(0, y as i32), CellState::EdgeBlock);
+        }
+
+        int.set(I2::new(0, height as i32), CellState::Roof);
+
+        int
+    }
+
+    pub fn gen(&self) -> Blueprint {
+        match self.froggy_rand.gen_usize_range("type", 0, 2) {
+            0 => self.gen_gothic_house("gothic"),
+            1 => self.gen_industrial("industrial"),
+            _ => self.gen_tower("tower"),
+        }.to_blueprint()
     }
 }
 
@@ -193,6 +212,7 @@ impl Generator {
 enum CellState {
     Empty,
     Roof,
+    EdgeBlock,
     Scaffolding,
 }
 
@@ -216,6 +236,14 @@ impl IntermediateStructure {
         *self.grid.get_mut(pos) = val
     }
 
+    pub fn set_block(&mut self, corner : I2, size : I2, val : CellState) {
+        for ix in 0..size.x {
+            for iy in 0..size.y {
+                self.set(I2::new(corner.x + ix, corner.y + iy), val);
+            }
+        }
+    }
+
     pub fn to_blueprint(&mut self) -> Blueprint {
         let mut blue = Blueprint::default();
 
@@ -230,8 +258,9 @@ impl IntermediateStructure {
             let mut p = p_ground;
 
             while (p.y < h) {
-                match self.grid.get(p) {
-                    CellState::Scaffolding => {
+                let cell_state = self.grid.get(p); 
+                match cell_state {
+                    CellState::EdgeBlock | CellState::Scaffolding => {
                         let corners = [I2::new(0, 0), I2::new(1, 0), I2::new(0, 1), I2::new(1, 1)];
 
                         for offset in &corners {
@@ -243,17 +272,36 @@ impl IntermediateStructure {
                         let bottom_left = p;
                         let bottom_right = p + I2::new(1, 0);
 
+                        let draw_all_ropes = cell_state == CellState::Scaffolding;
+
                         // Internal ropes
-                        blue.try_add_rope(top_left, bottom_right, false);
-                        blue.try_add_rope(bottom_left, top_right, false);
+                        blue.try_add_rope(top_left, bottom_right, draw_all_ropes);
+                        blue.try_add_rope(bottom_left, top_right, draw_all_ropes);
 
                         // Hoz
-                        blue.try_add_rope(top_left, top_right, true);
-                        blue.try_add_rope(bottom_left, bottom_right, true);
+                        let draw_up_rope = if draw_all_ropes { true } else {
+                            match self.grid.get(p + I2::new(0, 1)) {
+                                CellState::Empty => true,
+                                CellState::Roof => false,
+                                _ => false,
+                            }
+
+                            /*
+                            // This looks kinda cool
+                            true
+                            */
+                        };
+                        blue.try_add_rope(top_left, top_right, draw_up_rope);
+
+                        let draw_down_rope = draw_all_ropes || self.grid.get(p + I2::new(0, -1)) != CellState::EdgeBlock;
+                        blue.try_add_rope(bottom_left, bottom_right, draw_down_rope);
 
                         // Vert
-                        blue.try_add_rope(top_left, bottom_left, true);
-                        blue.try_add_rope(top_right, bottom_right, true);
+                        let draw_left_rope = draw_all_ropes || self.grid.get(p + I2::new(-1, 0)) != CellState::EdgeBlock;
+                        blue.try_add_rope(top_left, bottom_left, draw_left_rope);
+
+                        let draw_right_rope = draw_all_ropes || self.grid.get(p + I2::new(1, 0)) != CellState::EdgeBlock;
+                        blue.try_add_rope(top_right, bottom_right, draw_right_rope);
                     }
                     CellState::Roof => {
                         let roof_top = p.to_v2().add(Vec2::new(0.5, 1.));
